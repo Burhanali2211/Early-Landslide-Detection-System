@@ -39,12 +39,28 @@ Once an event has occurred, the system switches to Rescue Mode to assess damage 
 
 ---
 
-## Installation
+## Quick Start (One Command)
+To install dependencies, start the server, and automatically open the dashboard in one go, simply run the launcher script for your operating system:
+
+**On Windows:**
+Double click `run.bat` or run:
+```bat
+.\run.bat
+```
+
+**On Mac/Linux:**
+```bash
+bash run.sh
+```
+
+---
+
+## Manual Installation
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/Anandhanachu/ALPROS.git
-   cd ALPROS
+   git clone https://github.com/Burhanali2211/Early-Landslide-Detection-System.git
+   cd Early-Landslide-Detection-System
    ```
 
 2. Install dependencies:
