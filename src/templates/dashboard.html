@@ -1,0 +1,1574 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ALPROS – Landslide Risk Monitor</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg:        #0a0e14;
+            --panel:     #111720;
+            --border:    #1e2d3d;
+            --accent:    #00c8ff;
+            --accent2:   #ff4d4d;
+            --text:      #c9d4e0;
+            --dim:       #506070;
+            --green:     #00e676;
+            --yellow:    #ffd740;
+            --red:       #ff1744;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Rajdhani', sans-serif;
+            min-height: 100vh;
+        }
+
+        /* ── Header ── */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 28px;
+            border-bottom: 1px solid var(--border);
+            background: var(--panel);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 38px; height: 38px;
+            animation: pulse 2.4s ease-in-out infinite;
+            flex-shrink: 0;
+        }
+
+        @keyframes pulse {
+            0%,100% { opacity: 1; transform: scale(1); }
+            50%      { opacity: 0.7; transform: scale(0.93); }
+        }
+
+        .logo h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: 4px;
+            color: #fff;
+        }
+
+        .logo span {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.65rem;
+            color: var(--dim);
+            letter-spacing: 2px;
+            display: block;
+            margin-top: -2px;
+        }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--dim);
+        }
+
+        .live-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            box-shadow: 0 0 8px var(--green);
+            animation: blink 1.2s ease-in-out infinite;
+        }
+
+        /* Hide the live dot in rescue mode */
+        body.rescue-mode .live-dot,
+        body.rescue-mode #mode-label {
+            display: none;
+        }
+
+        @keyframes blink {
+            0%,100% { opacity: 1; }
+            50%      { opacity: 0.2; }
+        }
+
+        /* ── SOS Button ── */
+        .sos-btn {
+            display: none;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            width: 44px;
+            height: 44px;
+            border: 2px solid var(--yellow);
+            background: rgba(255, 215, 64, 0.12);
+            color: var(--yellow);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 0 10px rgba(255, 215, 64, 0.25);
+            animation: sos-pulse 1.8s ease-in-out infinite;
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        @keyframes sos-pulse {
+            0%,100% { box-shadow: 0 0 10px rgba(255,215,64,0.25); }
+            50%      { box-shadow: 0 0 20px rgba(255,215,64,0.6); }
+        }
+
+        .sos-btn:hover {
+            background: rgba(255, 215, 64, 0.25);
+            box-shadow: 0 0 26px rgba(255, 215, 64, 0.7);
+        }
+
+        .sos-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            animation: none;
+        }
+
+        .sos-btn.sending {
+            animation: sos-spin 0.7s linear infinite;
+            border-style: dashed;
+        }
+
+        .sos-btn.confirmed {
+            background: rgba(255, 215, 64, 0.3);
+            box-shadow: 0 0 28px rgba(255, 215, 64, 0.8);
+            animation: none;
+        }
+
+        .sos-btn.error {
+            border-color: var(--red);
+            color: var(--red);
+            background: rgba(255, 23, 68, 0.12);
+            box-shadow: 0 0 14px rgba(255, 23, 68, 0.4);
+            animation: none;
+        }
+
+        @keyframes sos-spin {
+            to { transform: rotate(360deg); }
+        }
+
+        body.rescue-mode .sos-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* ── Mode Toggle Tabs ── */
+        .mode-tabs {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            margin-left: 24px;
+        }
+
+        .mode-tab {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.7rem;
+            letter-spacing: 2px;
+            padding: 0 18px;
+            height: 32px;
+            line-height: 32px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--dim);
+            transition: all 0.2s;
+        }
+
+        .mode-tab:first-child { border-radius: 3px 0 0 3px; border-right: none; }
+        .mode-tab:last-child  { border-radius: 0 3px 3px 0; }
+
+        .mode-tab.active {
+            background: var(--green);
+            border-color: var(--green);
+            color: #000;
+            font-weight: 700;
+            box-shadow: 0 0 12px rgba(0,230,118,0.35);
+        }
+
+        .mode-tab.rescue-tab.active {
+            background: var(--red);
+            border-color: var(--red);
+            color: #fff;
+            box-shadow: 0 0 12px rgba(255,23,68,0.45);
+        }
+
+        /* ── Region Selector ── */
+        .region-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 28px;
+            background: var(--panel);
+            border-bottom: 1px solid var(--border);
+            flex-wrap: wrap;
+        }
+
+        .region-label {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--dim);
+            letter-spacing: 2px;
+            margin-right: 6px;
+        }
+
+        .region-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--dim);
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 1.5px;
+            padding: 6px 16px;
+            cursor: pointer;
+            border-radius: 3px;
+            transition: all 0.2s;
+        }
+
+        .region-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .region-btn.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #000;
+            box-shadow: 0 0 12px rgba(0,200,255,0.4);
+        }
+
+        /* ── Main Layout ── */
+        .main {
+            display: grid;
+            grid-template-columns: 1fr 260px;
+            gap: 0;
+            height: calc(100vh - 112px);
+        }
+
+        /* ── Map ── */
+        #map {
+            height: 100%;
+            width: 100%;
+            border-right: 1px solid var(--border);
+        }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            background: var(--panel);
+            overflow-y: auto;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .sidebar::-webkit-scrollbar { width: 4px; }
+        .sidebar::-webkit-scrollbar-track { background: transparent; }
+        .sidebar::-webkit-scrollbar-thumb { background: var(--border); }
+
+        .sidebar-section {
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 14px;
+        }
+
+        .sidebar-section h3 {
+            font-size: 0.65rem;
+            letter-spacing: 3px;
+            color: var(--dim);
+            font-family: 'Share Tech Mono', monospace;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+        }
+
+        .region-name {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--accent);
+            letter-spacing: 2px;
+            margin-bottom: 4px;
+        }
+
+        .gauge-wrap { text-align: center; }
+
+        .gauge-value {
+            font-size: 2.8rem;
+            font-weight: 700;
+            font-family: 'Share Tech Mono', monospace;
+            line-height: 1;
+        }
+
+        .gauge-label {
+            font-size: 0.7rem;
+            letter-spacing: 2px;
+            color: var(--dim);
+            margin-top: 4px;
+        }
+
+        .gauge-bar {
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+
+        .gauge-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.6s ease, background 0.4s;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .stat-box {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 8px 10px;
+        }
+
+        .stat-box .val {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 1rem;
+            color: #fff;
+        }
+
+        .stat-box .lbl {
+            font-size: 0.62rem;
+            letter-spacing: 1.5px;
+            color: var(--dim);
+            text-transform: uppercase;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            font-size: 0.82rem;
+        }
+
+        .legend-dot {
+            width: 12px; height: 12px;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+
+        .zone-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .zone-list::-webkit-scrollbar { width: 3px; }
+        .zone-list::-webkit-scrollbar-thumb { background: var(--border); }
+
+        .zone-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 8px;
+            border-radius: 3px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border);
+            font-size: 0.78rem;
+        }
+
+        .zone-row.danger {
+            border-color: var(--red);
+            background: rgba(255,23,68,0.08);
+        }
+
+        .badge {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.65rem;
+            padding: 2px 6px;
+            border-radius: 2px;
+            font-weight: 600;
+        }
+
+        .badge.GREEN  { background: rgba(0,230,118,0.15); color: var(--green); }
+        .badge.YELLOW { background: rgba(255,215,64,0.15); color: var(--yellow); }
+        .badge.RED    { background: rgba(255,23,68,0.15);  color: var(--red); }
+
+        .last-updated {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.65rem;
+            color: var(--dim);
+            text-align: center;
+        }
+
+        /* ── Spinner overlay ── */
+        #spinner {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(10,14,20,0.65);
+            z-index: 9999;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #spinner.show { display: flex; }
+
+        .spin-ring {
+            width: 44px; height: 44px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ══════════════════════════════════════════════
+           RESCUE MODE
+        ══════════════════════════════════════════════ */
+
+        #normal-view  { display: contents; }
+        #rescue-view  { display: none; }
+
+        body.rescue-mode #normal-view  { display: none; }
+        body.rescue-mode #rescue-view  { display: flex; }
+        body.rescue-mode .region-bar   { display: none; }
+
+        #rescue-view {
+            flex-direction: row;
+            height: calc(100vh - 62px);
+            overflow: hidden;
+        }
+
+        .rescue-panel {
+            width: 320px;
+            min-width: 320px;
+            background: var(--panel);
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .rescue-panel::-webkit-scrollbar { width: 4px; }
+        .rescue-panel::-webkit-scrollbar-thumb { background: var(--border); }
+
+        .rescue-results {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .rescue-results::-webkit-scrollbar { width: 4px; }
+        .rescue-results::-webkit-scrollbar-thumb { background: var(--border); }
+
+        .r-section {
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 16px;
+        }
+
+        .r-section h3 {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.65rem;
+            letter-spacing: 3px;
+            color: var(--dim);
+            text-transform: uppercase;
+            margin-bottom: 14px;
+        }
+
+        .rescue-alert {
+            border: 1px solid var(--red);
+            background: rgba(255,23,68,0.07);
+            border-radius: 4px;
+            padding: 12px 14px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.7rem;
+            letter-spacing: 1.5px;
+            color: var(--red);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .rescue-alert-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--red);
+            box-shadow: 0 0 6px var(--red);
+            animation: blink 0.8s ease-in-out infinite;
+            flex-shrink: 0;
+        }
+
+        label.r-label {
+            display: block;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.65rem;
+            letter-spacing: 2px;
+            color: var(--dim);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+        }
+
+        select.r-select {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 0.9rem;
+            padding: 9px 12px;
+            border-radius: 3px;
+            margin-bottom: 14px;
+            outline: none;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        select.r-select:focus { border-color: var(--accent); }
+
+        .drop-zone {
+            border: 2px dashed var(--border);
+            border-radius: 4px;
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+            margin-bottom: 14px;
+        }
+
+        .drop-zone:hover,
+        .drop-zone.drag-over {
+            border-color: var(--accent);
+            background: rgba(0,200,255,0.04);
+        }
+
+        .drop-zone input[type=file] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
+        }
+
+        .drop-icon {
+            font-size: 1.8rem;
+            margin-bottom: 8px;
+        }
+
+        .drop-text {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.68rem;
+            letter-spacing: 1.5px;
+            color: var(--dim);
+        }
+
+        .drop-filename {
+            margin-top: 8px;
+            font-size: 0.75rem;
+            color: var(--accent);
+            font-family: 'Share Tech Mono', monospace;
+            word-break: break-all;
+        }
+
+        .r-btn {
+            width: 100%;
+            padding: 11px;
+            border: none;
+            border-radius: 3px;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 0.95rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .r-btn-danger {
+            background: var(--red);
+            color: #fff;
+        }
+
+        .r-btn-danger:hover { filter: brightness(1.15); box-shadow: 0 0 14px rgba(255,23,68,0.45); }
+        .r-btn-danger:disabled { background: var(--border); color: var(--dim); cursor: not-allowed; box-shadow: none; }
+
+        .r-btn-ghost {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--dim);
+            margin-top: 8px;
+        }
+
+        .r-btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+        #r-status {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.7rem;
+            letter-spacing: 1px;
+            padding: 10px 12px;
+            border-radius: 3px;
+            display: none;
+            margin-top: 10px;
+        }
+
+        #r-status.ok  { background: rgba(0,230,118,0.08); border: 1px solid var(--green); color: var(--green); }
+        #r-status.err { background: rgba(255,23,68,0.08); border: 1px solid var(--red);   color: var(--red);   }
+        #r-status.info{ background: rgba(0,200,255,0.08); border: 1px solid var(--accent); color: var(--accent); }
+
+        .r-stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .r-stat {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .r-stat .rv {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 1.1rem;
+            color: #fff;
+        }
+
+        .r-stat .rl {
+            font-size: 0.6rem;
+            letter-spacing: 1.5px;
+            color: var(--dim);
+            text-transform: uppercase;
+            margin-top: 3px;
+        }
+
+        /* Reference warning */
+        .ref-warning {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.65rem;
+            letter-spacing: 1px;
+            color: var(--yellow);
+            background: rgba(255,215,64,0.07);
+            border: 1px solid rgba(255,215,64,0.3);
+            border-radius: 3px;
+            padding: 8px 10px;
+            margin-bottom: 12px;
+            line-height: 1.6;
+            display: none;
+        }
+
+        #r-result-img {
+            width: 100%;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            display: none;
+        }
+
+        .r-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+        }
+
+        .r-table th {
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.6rem;
+            letter-spacing: 2px;
+            color: var(--dim);
+            text-transform: uppercase;
+            padding: 8px 10px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .r-table td {
+            padding: 7px 10px;
+            border-bottom: 1px solid rgba(30,45,61,0.5);
+        }
+
+        .r-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+        .conf-high { color: var(--red);    font-weight: 700; }
+        .conf-mid  { color: var(--yellow); font-weight: 600; }
+        .conf-low  { color: var(--green);  }
+
+        #ref-panel { display: none; }
+        #ref-panel.open { display: block; }
+
+        .r-empty {
+            text-align: center;
+            padding: 48px 20px;
+            color: var(--dim);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.72rem;
+            letter-spacing: 2px;
+        }
+
+        .r-empty-icon { font-size: 2.5rem; margin-bottom: 12px; opacity: 0.4; }
+
+        @media (max-width: 700px) {
+            .main { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
+            #map  { height: 100%; }
+            .sidebar { max-height: 260px; }
+            #rescue-view { flex-direction: column; }
+            .rescue-panel { width: 100%; min-width: unset; border-right: none; border-bottom: 1px solid var(--border); }
+        }
+    </style>
+</head>
+
+<body>
+
+<div id="authority-alert" style="display:none; position:fixed; top:0; left:0; width:100%; background-color:#d32f2f; color:#ffffff; z-index:99999; padding:15px 20px; font-family:Arial, Helvetica, sans-serif; box-shadow:0 4px 10px rgba(0,0,0,0.5); border-bottom:4px solid #b71c1c; box-sizing:border-box;">
+    <div style="max-width:900px; margin:0 auto; display:flex; align-items:flex-start; gap:15px;">
+        <div style="font-size:32px; line-height:1;">⚠️</div>
+        <div>
+            <h2 style="margin:0 0 5px 0; font-size:22px; font-weight:bold; text-transform:uppercase; letter-spacing:0.5px;">CRITICAL EMERGENCY: NH-44 ROAD CLOSURE</h2>
+            <p style="margin:0 0 8px 0; font-size:16px; font-weight:bold;">A landslide event has been confirmed in the Ramban Sector.</p>
+            <p style="margin:0; font-size:14px; line-height:1.4;">
+                <strong>ACTION TAKEN:</strong> The National Highways Authority of India (NHAI) and local SDRF units have been electronically notified. 
+                Traffic on the Jammu-Srinagar National Highway (NH-44) is blocked immediately until further notice. Do not proceed.
+            </p>
+        </div>
+    </div>
+</div>
+
+<div id="spinner"><div class="spin-ring"></div></div>
+
+<header>
+    <div class="logo">
+        <div class="logo-icon">
+            <svg viewBox="0 0 38 38" width="38" height="38" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <!-- Outer ring -->
+                <circle cx="19" cy="19" r="17" stroke="#00c8ff" stroke-width="1.5" opacity="0.4"/>
+                <!-- Mid ring -->
+                <circle cx="19" cy="19" r="11" stroke="#00c8ff" stroke-width="1.5" opacity="0.6"/>
+                <!-- Inner ring -->
+                <circle cx="19" cy="19" r="5.5" stroke="#00c8ff" stroke-width="1.5" opacity="0.9"/>
+                <!-- Centre dot -->
+                <circle cx="19" cy="19" r="2" fill="#00c8ff"/>
+                <!-- Sweep arm -->
+                <line x1="19" y1="19" x2="19" y2="2" stroke="#00c8ff" stroke-width="1.8" stroke-linecap="round">
+                    <animateTransform attributeName="transform" type="rotate"
+                        from="0 19 19" to="360 19 19" dur="3s" repeatCount="indefinite"/>
+                </line>
+                <!-- Sweep glow arc (fading trail) -->
+                <path d="M19 2 A17 17 0 0 1 34.7 24" stroke="#00c8ff" stroke-width="3"
+                      stroke-linecap="round" opacity="0.25">
+                    <animateTransform attributeName="transform" type="rotate"
+                        from="0 19 19" to="360 19 19" dur="3s" repeatCount="indefinite"/>
+                </path>
+                <!-- Blip dot (rotates with sweep) -->
+                <circle cx="19" cy="5" r="2" fill="#00c8ff" opacity="0.9">
+                    <animateTransform attributeName="transform" type="rotate"
+                        from="0 19 19" to="360 19 19" dur="3s" repeatCount="indefinite"/>
+                </circle>
+            </svg>
+        </div>
+        <div>
+            <h1>ALPROS</h1>
+            <span>AI LANDSLIDE PREDICTION &amp; RESPONSE SYSTEM</span>
+        </div>
+        <div class="mode-tabs">
+            <button class="mode-tab active" id="tab-normal" onclick="setMode('normal')">MONITOR</button>
+            <button class="mode-tab rescue-tab" id="tab-rescue" onclick="setMode('rescue')">RESCUE ⚠</button>
+        </div>
+    </div>
+    <div class="status-bar">
+        <div class="live-dot" id="header-dot"></div>
+        <span id="mode-label">LIVE MONITORING</span>
+        <button class="sos-btn" onclick="handleSOS()">SOS</button>
+        <span id="clock">--:--:--</span>
+    </div>
+</header>
+
+<!-- ══════════════════════════════════════════
+     NORMAL MODE
+══════════════════════════════════════════ -->
+<div id="normal-view">
+
+    <!-- Single Region Mode: Ramban -->
+
+    <div class="main">
+        <div id="map"></div>
+
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <h3>Active Region</h3>
+                <div class="region-name" id="region-name">RAMBAN (NH-44)</div>
+                <div style="font-size:0.75rem; color:var(--dim);" id="region-coords">33.22°N – 75.20°E</div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>Peak Risk Score</h3>
+                <div class="gauge-wrap">
+                    <div class="gauge-value" id="gauge-val" style="color: var(--green)">—</div>
+                    <div class="gauge-label">PROBABILITY INDEX</div>
+                    <div class="gauge-bar">
+                        <div class="gauge-fill" id="gauge-fill" style="width:0%; background: var(--green)"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>Zone Summary</h3>
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="val" id="stat-green">—</div>
+                        <div class="lbl" style="color:var(--green)">GREEN</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="val" id="stat-yellow">—</div>
+                        <div class="lbl" style="color:var(--yellow)">YELLOW</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="val" id="stat-red">—</div>
+                        <div class="lbl" style="color:var(--red)">RED</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="val" id="stat-rain">—</div>
+                        <div class="lbl">RAIN mm/h</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>IoT Ground Sensors</h3>
+                <div class="stats-grid" style="grid-template-columns: 1fr 1fr;">
+                    <div class="stat-box" style="border-color: #333; background: #111;">
+                        <div class="val" id="sensor-temp">—</div>
+                        <div class="lbl" style="color:#00c8ff">TEMP (°C)</div>
+                    </div>
+                    <div class="stat-box" style="border-color: #333; background: #111;">
+                        <div class="val" id="sensor-moist">—</div>
+                        <div class="lbl" style="color:#00c8ff">SOIL MOISTURE</div>
+                    </div>
+                    <div class="stat-box" style="border-color: #333; background: #111;">
+                        <div class="val" id="sensor-humid">—</div>
+                        <div class="lbl" style="color:#00c8ff">HUMIDITY</div>
+                    </div>
+                    <div class="stat-box" style="border-color: #333; background: #111;">
+                        <div class="val" id="sensor-vib">—</div>
+                        <div class="lbl" style="color:var(--yellow)">VIBE (g)</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>Zone Index</h3>
+                <div class="zone-list" id="zone-list"></div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>Camera Monitor</h3>
+                <div style="background:#000; border:1px solid var(--border); height:120px; position:relative; overflow:hidden; border-radius:3px; margin-bottom:8px;" id="camera-feed-container">
+                    <video id="webcam-video" autoplay playsinline style="width:100%; height:100%; object-fit:cover; filter:grayscale(30%);"></video>
+                    <canvas id="webcam-canvas" style="display:none;"></canvas>
+                    <div style="position:absolute; top:4px; left:4px; color:var(--red); font-family:monospace; font-size:0.6rem; animation:blink 1.2s infinite;">⏺ REC</div>
+                    <div id="motion-overlay" style="display:none; position:absolute; inset:0; border:2px solid var(--red); background:rgba(255,23,68,0.2); pointer-events:none; align-items:center; justify-content:center; flex-direction:column;">
+                        <span style="color:var(--red); font-weight:bold; font-size:0.9rem; background:rgba(0,0,0,0.7); padding:2px 6px; font-family:'Share Tech Mono', monospace; text-align:center;">⚠ MOTION<br>DETECTED</span>
+                    </div>
+                </div>
+                <button class="region-btn" style="width:100%; border-color:var(--yellow); color:var(--yellow);" onclick="toggleMotionSimulation()" id="motion-sim-btn">
+                    ENABLE LIVE CAMERA
+                </button>
+            </div>
+
+            <div class="last-updated" id="last-updated">LAST UPDATE: —</div>
+        </aside>
+    </div>
+
+</div><!-- /#normal-view -->
+
+
+<!-- ══════════════════════════════════════════
+     RESCUE MODE
+══════════════════════════════════════════ -->
+<div id="rescue-view">
+
+    <!-- LEFT: Controls -->
+    <div class="rescue-panel">
+
+        <div class="rescue-alert">
+            <div class="rescue-alert-dot"></div>
+            EMERGENCY RESCUE MODE ACTIVE
+        </div>
+
+        <div class="r-section">
+            <h3>Upload Affected Area Image</h3>
+
+            <label class="r-label">Select Region</label>
+            <select class="r-select" id="r-region">
+                <option value="ramban">Ramban (NH-44)</option>
+            </select>
+
+            <label class="r-label">Post-Disaster Image</label>
+            <div class="drop-zone" id="drop-zone">
+                <input type="file" id="r-img-file" accept="image/*" onchange="onFileSelect(this)"/>
+                <div class="drop-icon">🛰</div>
+                <div class="drop-text">DROP IMAGE OR CLICK TO BROWSE<br>JPG / PNG</div>
+                <div class="drop-filename" id="drop-filename"></div>
+            </div>
+
+            <button class="r-btn r-btn-danger" id="r-analyse-btn" onclick="runRescueAnalysis()" disabled>
+                ⚡ ANALYSE &amp; DETECT VICTIMS
+            </button>
+
+            <div id="r-status"></div>
+        </div>
+
+        <div class="r-section">
+            <h3>Reference Image</h3>
+            <p style="font-size:0.8rem;color:var(--dim);margin-bottom:12px;line-height:1.5">
+                Pre-disaster reference images are compared against uploads.
+                Update if your baseline has changed.
+            </p>
+            <button class="r-btn r-btn-ghost" onclick="toggleRefPanel()">
+                📥 UPDATE REFERENCE
+            </button>
+
+            <div id="ref-panel">
+                <br>
+                <label class="r-label">Region</label>
+                <select class="r-select" id="ref-region">
+                    <option value="ramban">Ramban (NH-44)</option>
+                </select>
+
+                <label class="r-label">Reference (Pre-Disaster)</label>
+                <div class="drop-zone" style="margin-bottom:10px">
+                    <input type="file" id="ref-file" accept="image/*" onchange="onRefFileSelect(this)"/>
+                    <div class="drop-icon" style="font-size:1.2rem">📁</div>
+                    <div class="drop-text">SELECT REFERENCE IMAGE</div>
+                    <div class="drop-filename" id="ref-filename"></div>
+                </div>
+
+                <button class="r-btn r-btn-ghost" onclick="uploadReference()">
+                    💾 SAVE REFERENCE
+                </button>
+                <div id="ref-status" style="margin-top:8px;font-family:'Share Tech Mono',monospace;font-size:0.68rem;color:var(--dim)"></div>
+            </div>
+        </div>
+
+    </div><!-- /.rescue-panel -->
+
+    <!-- RIGHT: Results -->
+    <div class="rescue-results">
+
+        <div class="r-empty" id="r-empty-state">
+            <div class="r-empty-icon">🔍</div>
+            <div>AWAITING IMAGE UPLOAD</div>
+            <div style="margin-top:8px;opacity:.6;font-size:.62rem">
+                SELECT A REGION AND UPLOAD A POST-DISASTER<br>IMAGE TO BEGIN VICTIM DETECTION
+            </div>
+        </div>
+
+        <div id="r-results" style="display:none; flex-direction:column; gap:16px;">
+
+            <!-- Summary stats -->
+            <div class="r-section">
+                <h3>Analysis Summary</h3>
+
+                <div id="r-ref-warning" class="ref-warning"></div>
+
+                <div class="r-stats-grid">
+                    <div class="r-stat">
+                        <div class="rv" id="r-ssim">—</div>
+                        <div class="rl">SSIM Score</div>
+                    </div>
+                    <div class="r-stat">
+                        <div class="rv" id="r-dmg">—</div>
+                        <div class="rl">Damage %</div>
+                    </div>
+                    <div class="r-stat">
+                        <div class="rv" id="r-zones-count">—</div>
+                        <div class="rl" id="r-zones-label">Victims Det.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Annotated image -->
+            <div class="r-section">
+                <h3>Annotated Output</h3>
+                <img id="r-result-img" alt="Annotated result" src=""/>
+            </div>
+
+            <!-- Victim markers table -->
+            <div class="r-section">
+                <h3>Predicted Victim Positions</h3>
+                <div style="overflow-x:auto">
+                    <table class="r-table">
+                        <thead>
+                            <tr>
+                                <th>Marker</th>
+                                <th>Confidence</th>
+                                <th>Centre Lat</th>
+                                <th>Centre Lon</th>
+                                <th>Pixel X</th>
+                                <th>Pixel Y</th>
+                            </tr>
+                        </thead>
+                        <tbody id="r-zones-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div><!-- /#r-results -->
+
+    </div><!-- /.rescue-results -->
+
+</div><!-- /#rescue-view -->
+
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+
+/* ─── Mode switching ──────────────────────────────────────────────── */
+function setMode(mode) {
+    const body = document.body;
+    const tabN = document.getElementById('tab-normal');
+    const tabR = document.getElementById('tab-rescue');
+    const dot  = document.getElementById('header-dot');
+    const lbl  = document.getElementById('mode-label');
+
+    if (mode === 'rescue') {
+        body.classList.add('rescue-mode');
+        tabN.classList.remove('active');
+        tabR.classList.add('active');
+        if (window._refreshTimer) clearInterval(window._refreshTimer);
+    } else {
+        body.classList.remove('rescue-mode');
+        tabN.classList.add('active');
+        tabR.classList.remove('active');
+        dot.classList.remove('danger');
+        lbl.textContent = 'LIVE MONITORING';
+        loadGrid();
+        window._refreshTimer = setInterval(loadGrid, 5000);
+    }
+}
+
+/* ─── SOS Handler ─────────────────────────────────────────────────── */
+async function handleSOS() {
+    const btn = document.querySelector('.sos-btn');
+    btn.disabled  = true;
+    btn.classList.add('sending');
+    btn.textContent = '…';
+
+    // Helper to reset button after a delay
+    function resetBtn(state, label, delay = 3000) {
+        btn.classList.remove('sending', 'confirmed', 'error');
+        btn.classList.add(state);
+        btn.textContent = label;
+        setTimeout(() => {
+            btn.classList.remove(state);
+            btn.textContent = 'SOS';
+            btn.disabled = false;
+        }, delay);
+    }
+
+    // Try to get GPS coords
+    function getLocation() {
+        return new Promise((resolve, reject) => {
+            if (!navigator.geolocation) {
+                reject(new Error('Geolocation not supported'));
+            } else {
+                navigator.geolocation.getCurrentPosition(
+                    pos => resolve({
+                        latitude:  pos.coords.latitude,
+                        longitude: pos.coords.longitude,
+                        accuracy:  pos.coords.accuracy,
+                    }),
+                    err => reject(err),
+                    { enableHighAccuracy: true, timeout: 8000 }
+                );
+            }
+        });
+    }
+
+    let payload = { name: 'Rescue App User' };
+
+    try {
+        const loc = await getLocation();
+        payload.latitude  = loc.latitude;
+        payload.longitude = loc.longitude;
+        payload.accuracy  = loc.accuracy;
+    } catch (_) {
+        // GPS unavailable — send without coordinates; server will reject with 400
+        // but we still attempt so the backend log captures the attempt
+        payload.latitude  = null;
+        payload.longitude = null;
+        resetBtn('error', '✕', 4000);
+        showSOSToast('Could not get GPS location. Enable location access and try again.', true);
+        return;
+    }
+
+    try {
+        const res  = await fetch('/rescue/sos', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(payload),
+        });
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+            resetBtn('error', '✕', 4000);
+            showSOSToast('SOS failed: ' + (data.error || res.statusText), true);
+        } else {
+            resetBtn('confirmed', '✓', 5000);
+            showSOSToast('SOS sent! ID: ' + data.alert_id + ' — Help is on the way.', false);
+        }
+    } catch (e) {
+        resetBtn('error', '✕', 4000);
+        showSOSToast('Network error: ' + e.message, true);
+    }
+}
+
+function showSOSToast(msg, isError) {
+    let toast = document.getElementById('sos-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'sos-toast';
+        toast.style.cssText = `
+            position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+            font-family: 'Share Tech Mono', monospace; font-size: 0.72rem; letter-spacing: 1.5px;
+            padding: 10px 20px; border-radius: 4px; z-index: 99999;
+            transition: opacity 0.4s; pointer-events: none;
+        `;
+        document.body.appendChild(toast);
+    }
+    toast.style.background = isError ? 'rgba(255,23,68,0.12)'      : 'rgba(255,215,64,0.1)';
+    toast.style.border      = isError ? '1px solid var(--red)'       : '1px solid var(--yellow)';
+    toast.style.color       = isError ? 'var(--red)'                 : 'var(--yellow)';
+    toast.textContent       = msg;
+    toast.style.opacity     = '1';
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, 5000);
+}
+
+/* ─── Clock ───────────────────────────────────────────────────────── */
+function updateClock() {
+    document.getElementById('clock').textContent =
+        new Date().toLocaleTimeString('en-GB');
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+/* ─── Region centres ──────────────────────────────────────────────── */
+const REGION_VIEWS = {
+    ramban: { center: [33.225, 75.200], zoom: 14 },
+};
+
+/* ─── Map setup ───────────────────────────────────────────────────── */
+const map = L.map('map').setView([33.225, 75.200], 14);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+const gridLayerGroup = L.layerGroup().addTo(map);
+
+let currentRegion = 'ramban';
+let isInitialLoad = true;
+window.mockMotionActive = false;
+
+let webcamStream = null;
+let motionInterval = null;
+
+async function toggleMotionSimulation() {
+    const btn = document.getElementById('motion-sim-btn');
+    const overlay = document.getElementById('motion-overlay');
+    const video = document.getElementById('webcam-video');
+    
+    if (!window.mockMotionActive) {
+        try {
+            webcamStream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = webcamStream;
+            window.mockMotionActive = true;
+            
+            btn.textContent = 'DISABLE LIVE CAMERA';
+            btn.style.background = 'var(--red)';
+            btn.style.color = '#fff';
+            btn.style.borderColor = 'var(--red)';
+            
+            motionInterval = setInterval(sendFrameToBackend, 1000);
+        } catch (err) {
+            alert('Camera access denied or unavailable: ' + err.message);
+        }
+    } else {
+        window.mockMotionActive = false;
+        if (webcamStream) {
+            webcamStream.getTracks().forEach(track => track.stop());
+        }
+        video.srcObject = null;
+        clearInterval(motionInterval);
+        
+        btn.textContent = 'ENABLE LIVE CAMERA';
+        btn.style.background = 'transparent';
+        btn.style.color = 'var(--yellow)';
+        btn.style.borderColor = 'var(--yellow)';
+        overlay.style.display = 'none';
+        loadGrid(); // Force immediate update
+    }
+}
+
+async function sendFrameToBackend() {
+    const video = document.getElementById('webcam-video');
+    const canvas = document.getElementById('webcam-canvas');
+    if (!video.videoWidth) return;
+    
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+    
+    try {
+        const res = await fetch('/api/camera_motion', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: dataUrl })
+        });
+        const data = await res.json();
+        
+        const overlay = document.getElementById('motion-overlay');
+        if (data.alert) {
+            overlay.style.display = 'flex';
+            loadGrid(); // Force dashboard update
+        } else {
+            overlay.style.display = 'none';
+        }
+    } catch(err) {
+        console.error('Camera backend error', err);
+    }
+}
+function loadGrid() {
+    if (isInitialLoad) document.getElementById('spinner').classList.add('show');
+    fetch(`/grid_risk?region=${currentRegion}`)
+        .then(r => r.json())
+        .then(data => { 
+            // the camera_alert overrides happen on the backend now!
+            renderGrid(data); 
+            updateSidebar(data); 
+        })
+        .catch(err => console.error('Grid load error:', err))
+        .finally(() => {
+            if (isInitialLoad) {
+                document.getElementById('spinner').classList.remove('show');
+                isInitialLoad = false;
+            }
+        });
+}
+
+function renderGrid(data) {
+    gridLayerGroup.clearLayers();
+    const zones      = data.zones;
+    const dangerZone = data.most_dangerous;
+
+    zones.forEach(zone => {
+        const isDanger = zone.zone_id === dangerZone;
+        let fillColor = '#00e676';
+        if (zone.status === 'YELLOW') fillColor = '#ffd740';
+        if (zone.status === 'RED')    fillColor = '#ff1744';
+        if (isDanger)                 fillColor = '#8b0000';
+
+        const rect = L.rectangle(
+            [[zone.lat1, zone.lon1], [zone.lat2, zone.lon2]],
+            {
+                color:       isDanger ? '#ff1744' : fillColor,
+                fillColor:   fillColor,
+                weight:      isDanger ? 3 : 1,
+                fillOpacity: isDanger ? 0.6 : 0.4,
+            }
+        );
+
+        rect.bindPopup(`
+            <div style="font-family:'Rajdhani',sans-serif; min-width:160px;">
+                <div style="font-size:1rem;font-weight:700;margin-bottom:6px;">
+                    Zone ${zone.zone_id} ${isDanger ? '⚠️' : ''}
+                </div>
+                <table style="font-size:0.85rem;border-collapse:collapse;width:100%">
+                    <tr><td style="color:#888;padding:2px 0">Risk</td>
+                        <td style="font-weight:700">${zone.risk}</td></tr>
+                    <tr><td style="color:#888;padding:2px 0">Status</td>
+                        <td><b style="color:${statusColor(zone.status)}">${zone.status}</b></td></tr>
+                    <tr><td style="color:#888;padding:2px 0">Elevation</td>
+                        <td>${zone.elevation} m</td></tr>
+                    <tr><td style="color:#888;padding:2px 0">Slope</td>
+                        <td>${zone.slope}</td></tr>
+                    <tr><td style="color:#888;padding:2px 0">Soil</td>
+                        <td>${zone.soil_factor}</td></tr>
+                    <tr><td style="color:#888;padding:2px 0">Rain 1h</td>
+                        <td>${zone.rainfall_1h} mm</td></tr>
+                </table>
+            </div>
+        `);
+
+        gridLayerGroup.addLayer(rect);
+    });
+}
+
+function statusColor(s) {
+    if (s === 'GREEN')  return '#00e676';
+    if (s === 'YELLOW') return '#ffd740';
+    return '#ff1744';
+}
+
+function updateSidebar(data) {
+    const zones = data.zones;
+    const g = zones.filter(z => z.status === 'GREEN').length;
+    const y = zones.filter(z => z.status === 'YELLOW').length;
+    const r = zones.filter(z => z.status === 'RED').length;
+
+    document.getElementById('stat-green').textContent  = g;
+    document.getElementById('stat-yellow').textContent = y;
+    document.getElementById('stat-red').textContent    = r;
+
+    const rain = zones[0]?.rainfall_1h ?? '—';
+    document.getElementById('stat-rain').textContent = rain;
+
+    if (data.sensors) {
+        document.getElementById('sensor-temp').textContent = data.sensors.temperature + '°';
+        document.getElementById('sensor-moist').textContent = data.sensors.soil_moisture + '%';
+        document.getElementById('sensor-humid').textContent = data.sensors.humidity + '%';
+        
+        const vibElem = document.getElementById('sensor-vib');
+        vibElem.textContent = data.sensors.vibration;
+        if (data.sensors.vibration > 0.04) {
+            vibElem.style.color = 'var(--red)';
+        } else {
+            vibElem.style.color = '#fff';
+        }
+    }
+
+    const maxRisk   = Math.max(...zones.map(z => z.risk));
+    const gaugeVal  = document.getElementById('gauge-val');
+    const gaugeFill = document.getElementById('gauge-fill');
+
+    gaugeVal.textContent = isFinite(maxRisk) ? maxRisk.toFixed(2) : '—';
+
+    let riskColor = 'var(--green)';
+    if (maxRisk >= 0.7) {
+        riskColor = 'var(--red)';
+        document.getElementById('authority-alert').style.display = 'block';
+    } else if (maxRisk >= 0.4) {
+        riskColor = 'var(--yellow)';
+        document.getElementById('authority-alert').style.display = 'none';
+    } else {
+        document.getElementById('authority-alert').style.display = 'none';
+    }
+
+    gaugeVal.style.color       = riskColor;
+    gaugeFill.style.width      = (maxRisk * 100).toFixed(1) + '%';
+    gaugeFill.style.background = riskColor;
+
+    const dangerZone = zones.find(z => z.zone_id === data.most_dangerous);
+    if (dangerZone) {
+        const lat = ((dangerZone.lat1 + dangerZone.lat2) / 2).toFixed(3);
+        const lon = ((dangerZone.lon1 + dangerZone.lon2) / 2).toFixed(3);
+        document.getElementById('region-coords').textContent = `${lat}°N – ${lon}°E`;
+    }
+
+    const list = document.getElementById('zone-list');
+    list.innerHTML = '';
+    [...zones].sort((a, b) => b.risk - a.risk).forEach(zone => {
+        const isDanger = zone.zone_id === data.most_dangerous;
+        const row = document.createElement('div');
+        row.className = 'zone-row' + (isDanger ? ' danger' : '');
+        row.innerHTML = `
+            <span style="font-family:'Share Tech Mono',monospace;font-size:0.72rem">
+                ${zone.zone_id}${isDanger ? ' ⚠' : ''}
+            </span>
+            <span class="badge ${zone.status}">${zone.risk.toFixed(2)}</span>
+        `;
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', () => {
+            const lat = (zone.lat1 + zone.lat2) / 2;
+            const lon = (zone.lon1 + zone.lon2) / 2;
+            map.setView([lat, lon], 16);
+        });
+        list.appendChild(row);
+    });
+
+    document.getElementById('last-updated').textContent =
+        'LAST UPDATE: ' + new Date().toLocaleTimeString('en-GB');
+}
+
+loadGrid();
+window._refreshTimer = setInterval(loadGrid, 5000);
+
+/* ══════════════════════════════════════════════════════════════════
+   RESCUE MODE LOGIC
+══════════════════════════════════════════════════════════════════ */
+
+function showRStatus(msg, type) {
+    const el = document.getElementById('r-status');
+    el.style.display = 'block';
+    el.className = type;
+    el.textContent = msg;
+}
+
+function onFileSelect(input) {
+    const file = input.files[0];
+    document.getElementById('drop-filename').textContent = file ? file.name : '';
+    document.getElementById('r-analyse-btn').disabled = !file;
+}
+
+function onRefFileSelect(input) {
+    const file = input.files[0];
+    document.getElementById('ref-filename').textContent = file ? file.name : '';
+}
+
+function toggleRefPanel() {
+    document.getElementById('ref-panel').classList.toggle('open');
+}
+
+const dropZone = document.getElementById('drop-zone');
+['dragenter', 'dragover'].forEach(e => dropZone.addEventListener(e, ev => {
+    ev.preventDefault(); dropZone.classList.add('drag-over');
+}));
+['dragleave', 'drop'].forEach(e => dropZone.addEventListener(e, () => {
+    dropZone.classList.remove('drag-over');
+}));
+
+async function runRescueAnalysis() {
+    const file   = document.getElementById('r-img-file').files[0];
+    const region = document.getElementById('r-region').value;
+
+    if (!file) { showRStatus('No image selected.', 'err'); return; }
+
+    const btn = document.getElementById('r-analyse-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ ANALYSING…';
+    showRStatus('Uploading and running analysis…', 'info');
+
+    document.getElementById('r-empty-state').style.display = 'none';
+    document.getElementById('r-results').style.display     = 'none';
+
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('region', region);
+
+    try {
+        const res  = await fetch('/rescue/analyse', { method: 'POST', body: fd });
+        const data = await res.json();
+
+        if (data.error) {
+            showRStatus('ERROR: ' + data.error, 'err');
+            document.getElementById('r-empty-state').style.display = 'block';
+            return;
+        }
+
+        if (data.message) {
+            showRStatus('ℹ ' + data.message, 'info');
+            document.getElementById('r-empty-state').style.display = 'block';
+            return;
+        }
+
+        document.getElementById('r-ssim').textContent        = data.ssim_score ?? '—';
+        document.getElementById('r-dmg').textContent         = (data.damage_percent ?? '—') + '%';
+        document.getElementById('r-zones-count').textContent = (data.victim_zones ?? []).length;
+
+        const refWarn = document.getElementById('r-ref-warning');
+        if (data.reference_warning) {
+            refWarn.textContent    = '⚠ ' + data.reference_warning;
+            refWarn.style.display  = 'block';
+        } else {
+            refWarn.style.display  = 'none';
+        }
+
+        const img = document.getElementById('r-result-img');
+        img.src         = data.output_image_url + '?t=' + Date.now();
+        img.style.display = 'block';
+
+        const tbody = document.getElementById('r-zones-body');
+        tbody.innerHTML = '';
+
+        const zones = data.victim_zones ?? [];
+
+        if (zones.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--dim);
+                font-family:'Share Tech Mono',monospace;font-size:0.72rem;padding:16px">
+                NO VICTIM MARKERS DETECTED</td></tr>`;
+        } else {
+            zones.forEach(z => {
+                const pct = ((z.confidence ?? 0) * 100).toFixed(0) + '%';
+                const cls = (z.confidence ?? 0) > 0.6 ? 'conf-high'
+                          : (z.confidence ?? 0) > 0.3 ? 'conf-mid'
+                          : 'conf-low';
+                tbody.innerHTML += `<tr>
+                    <td style="font-family:'Share Tech Mono',monospace">${z.id ?? '—'}</td>
+                    <td class="${cls}">${pct}</td>
+                    <td>${z.centre_lat ?? '—'}</td>
+                    <td>${z.centre_lon ?? '—'}</td>
+                    <td style="font-family:'Share Tech Mono',monospace">${z.cx ?? '—'}</td>
+                    <td style="font-family:'Share Tech Mono',monospace">${z.cy ?? '—'}</td>
+                </tr>`;
+            });
+        }
+
+        document.getElementById('r-results').style.display = 'flex';
+        showRStatus(
+            `✓ ANALYSIS COMPLETE — ${zones.length} VICTIM MARKER(S) DETECTED`,
+            zones.length > 0 ? 'ok' : 'info'
+        );
+
+    } catch (e) {
+        showRStatus('NETWORK ERROR: ' + e.message, 'err');
+        document.getElementById('r-empty-state').style.display = 'block';
+    } finally {
+        btn.disabled    = false;
+        btn.textContent = '⚡ ANALYSE & DETECT VICTIMS';
+    }
+}
+
+async function uploadReference() {
+    const file   = document.getElementById('ref-file').files[0];
+    const region = document.getElementById('ref-region').value;
+    const status = document.getElementById('ref-status');
+
+    if (!file) { status.textContent = 'SELECT A FILE FIRST'; return; }
+
+    status.textContent = 'UPLOADING…';
+
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('region', region);
+
+    try {
+        const res  = await fetch('/rescue/set_reference', { method: 'POST', body: fd });
+        const data = await res.json();
+        status.style.color = data.error ? 'var(--red)' : 'var(--green)';
+        status.textContent = (data.message || data.error || '').toUpperCase();
+    } catch (e) {
+        status.style.color = 'var(--red)';
+        status.textContent = 'UPLOAD FAILED: ' + e.message.toUpperCase();
+    }
+}
+
+</script>
+</body>
+</html>

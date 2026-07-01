@@ -1,0 +1,381 @@
+from flask import Flask, jsonify, render_template, request
+from rescue import rescue_bp
+import numpy as np
+import requests
+import joblib
+import os
+import cv2
+import base64
+
+app = Flask(__name__)
+app.register_blueprint(rescue_bp)
+
+# -----------------------------
+# 🔹 Load AI Model
+# -----------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+model_path = os.path.join(BASE_DIR, "landslide_model.pkl")
+
+model = joblib.load(model_path)
+print("Model expects:", model.n_features_in_)
+
+# -----------------------------
+# 🔹 Camera State
+# -----------------------------
+camera_alert_active = False
+prev_camera_frame = None
+
+# -----------------------------
+# 🔹 Region Definitions
+# Each region has:
+#   lat/lon bounding box, OpenWeather city name, display name
+# -----------------------------
+REGIONS = {
+    "ramban": {
+        "name":      "Ramban (NH-44)",
+        "lat_start": 33.20,
+        "lat_end":   33.25,
+        "lon_start": 75.15,
+        "lon_end":   75.25,
+        "city":      "Ramban",
+    },
+}
+
+ROWS = 5
+COLS = 5
+
+# -----------------------------
+# 🔹 API Keys & Config
+# -----------------------------
+OPENWEATHER_API_KEY = os.environ.get("OPENWEATHER_API_KEY", "YOUR_OPENWEATHER_API_KEY")
+
+BHUVAN_API_TOKEN  = os.environ.get("BHUVAN_API_TOKEN", "YOUR_BHUVAN_API_TOKEN")
+BHUVAN_WMS_URL    = "https://bhuvan-vec2.nrsc.gov.in/bhuvan/wms"
+BHUVAN_LULC_LAYER = "lulc50k_1516"
+
+# -----------------------------
+# 🔹 LULC Class → Soil Risk Factor
+# -----------------------------
+LULC_RISK_MAP = {
+    "Built-up":                        0.65,
+    "Agricultural Land":               0.55,
+    "Forest":                          0.25,
+    "Wasteland":                       0.80,
+    "Water Bodies":                    0.30,
+    "Grassland / Grazing Land":        0.50,
+    "Scrub Land":                      0.75,
+    "Snow and Glaciers":               0.20,
+    "Barren / Rocky / Stony Waste":   0.15,
+    "Plantations":                     0.30,
+    "Mining / Industrial":             0.70,
+    "DEFAULT":                         0.50,
+}
+
+# -----------------------------
+# 🔹 Caches (keyed by lat/lon so all regions share one cache)
+# -----------------------------
+elevation_cache = {}
+soil_cache      = {}
+weather_cache   = {}   # keyed by city name
+
+# -----------------------------
+# 🔹 Get Elevation (Open-Elevation)
+# -----------------------------
+def get_elevation(lat, lon):
+    key = f"{round(lat, 5)}_{round(lon, 5)}"
+    if key in elevation_cache:
+        return elevation_cache[key]
+    try:
+        url = f"https://api.open-elevation.com/api/v1/lookup?locations={lat},{lon}"
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        elevation = data["results"][0]["elevation"]
+        elevation_cache[key] = elevation
+        return elevation
+    except:
+        return 100  # fallback
+
+# -----------------------------
+# 🔹 Get Weather (OpenWeather) — per city
+# -----------------------------
+def get_weather(city):
+    if city in weather_cache:
+        return weather_cache[city]
+    try:
+        url = (
+            f"http://api.openweathermap.org/data/2.5/weather"
+            f"?q={city}&appid={OPENWEATHER_API_KEY}&units=metric"
+        )
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        rainfall = data.get("rain", {}).get("1h", 0)
+        temp = data.get("main", {}).get("temp", 22.5)
+        humidity = data.get("main", {}).get("humidity", 65)
+        
+        weather_cache[city] = {"rain": rainfall, "temp": temp, "humidity": humidity}
+        return weather_cache[city]
+    except:
+        return {"rain": 0, "temp": 22.5, "humidity": 65}
+
+# -----------------------------
+# 🔹 Get Soil Factor from Bhuvan WMS
+# -----------------------------
+def get_soil_factor_bhuvan(lat, lon):
+    key = f"{round(lat, 4)}_{round(lon, 4)}"
+    if key in soil_cache:
+        return soil_cache[key]
+
+    try:
+        delta = 0.0005
+        bbox  = f"{lon - delta},{lat - delta},{lon + delta},{lat + delta}"
+
+        params = {
+            "SERVICE":      "WMS",
+            "VERSION":      "1.1.1",
+            "REQUEST":      "GetFeatureInfo",
+            "LAYERS":       BHUVAN_LULC_LAYER,
+            "QUERY_LAYERS": BHUVAN_LULC_LAYER,
+            "STYLES":       "",
+            "BBOX":         bbox,
+            "WIDTH":        "3",
+            "HEIGHT":       "3",
+            "SRS":          "EPSG:4326",
+            "FORMAT":       "image/png",
+            "INFO_FORMAT":  "application/json",
+            "X":            "1",
+            "Y":            "1",
+            "token":        BHUVAN_API_TOKEN,
+        }
+
+        response = requests.get(BHUVAN_WMS_URL, params=params, timeout=8)
+
+        if response.status_code == 200:
+            try:
+                data     = response.json()
+                features = data.get("features", [])
+                if features:
+                    props = features[0].get("properties", {})
+                    lulc_class = (
+                        props.get("class_name")
+                        or props.get("Class_Name")
+                        or props.get("LULC_CLASS")
+                        or props.get("lulc_class")
+                        or props.get("category")
+                        or ""
+                    )
+                    factor = LULC_RISK_MAP["DEFAULT"]
+                    for class_key, risk in LULC_RISK_MAP.items():
+                        if class_key.lower() in lulc_class.lower():
+                            factor = risk
+                            break
+                    soil_cache[key] = factor
+                    print(f"Bhuvan LULC at ({lat},{lon}): '{lulc_class}' → soil_factor={factor}")
+                    return factor
+            except ValueError:
+                factor = _parse_lulc_text(response.text.strip())
+                soil_cache[key] = factor
+                return factor
+
+        print(f"Bhuvan WMS returned status {response.status_code} for ({lat},{lon})")
+
+    except requests.exceptions.Timeout:
+        print(f"Bhuvan WMS timeout for ({lat},{lon})")
+    except Exception as e:
+        print(f"Bhuvan WMS error for ({lat},{lon}): {e}")
+
+    return 0.5
+
+
+def _parse_lulc_text(text):
+    text_lower = text.lower()
+    for class_key, risk in LULC_RISK_MAP.items():
+        if class_key.lower() in text_lower:
+            return risk
+    return LULC_RISK_MAP["DEFAULT"]
+
+
+# -----------------------------
+# 🔹 Generate Micro-Zones for a given region
+# -----------------------------
+def generate_microzones(region_cfg):
+    lat_points = np.linspace(region_cfg["lat_start"], region_cfg["lat_end"], ROWS + 1)
+    lon_points = np.linspace(region_cfg["lon_start"], region_cfg["lon_end"], COLS + 1)
+
+    zones = []
+    for i in range(ROWS):
+        for j in range(COLS):
+            zones.append({
+                "zone_id": f"Z{i+1}{j+1}",
+                "row":     i + 1,
+                "col":     j + 1,
+                "lat1":    float(lat_points[i]),
+                "lon1":    float(lon_points[j]),
+                "lat2":    float(lat_points[i + 1]),
+                "lon2":    float(lon_points[j + 1]),
+            })
+    return zones
+
+
+# -----------------------------
+# 🔹 AI Grid Risk Route
+# Usage: /grid_risk?region=ramban
+#        /grid_risk           (defaults to ramban)
+# -----------------------------
+@app.route("/grid_risk")
+def grid_risk():
+    global camera_alert_active
+    region_key = request.args.get("region", "ramban").lower().strip()
+
+    if region_key not in REGIONS:
+        return jsonify({
+            "error":            f"Unknown region '{region_key}'.",
+            "available_regions": list(REGIONS.keys()),
+        }), 400
+
+    region_cfg = REGIONS[region_key]
+    base_grid  = generate_microzones(region_cfg)
+    weather    = get_weather(region_cfg["city"])
+    rainfall   = weather["rain"]
+
+    rain_24h = rainfall * 4
+    rain_72h = rainfall * 10
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    def process_zone(zone):
+        center_lat = (zone["lat1"] + zone["lat2"]) / 2
+        center_lon = (zone["lon1"] + zone["lon2"]) / 2
+
+        elevation   = get_elevation(center_lat, center_lon)
+        slope       = min(abs(elevation - 100) / 300, 1)
+        soil_factor = get_soil_factor_bhuvan(center_lat, center_lon)
+
+        features    = [[rain_24h, rain_72h, slope, elevation, soil_factor]]
+        probability = model.predict_proba(features)[0][1]
+        risk_score  = round(float(probability), 2)
+
+        if risk_score < 0.4:
+            status = "GREEN"
+        elif risk_score < 0.7:
+            status = "YELLOW"
+        else:
+            status = "RED"
+
+        zone["risk"]        = risk_score
+        zone["status"]      = status
+        zone["elevation"]   = elevation
+        zone["slope"]       = round(slope, 2)
+        zone["soil_factor"] = soil_factor
+        zone["rainfall_1h"] = rainfall
+        
+        return zone
+
+    enriched_grid  = []
+    highest_risk   = 0
+    most_dangerous = None
+
+    with ThreadPoolExecutor(max_workers=25) as executor:
+        results = list(executor.map(process_zone, base_grid))
+
+    for zone in results:
+        if zone["risk"] > highest_risk:
+            highest_risk   = zone["risk"]
+            most_dangerous = zone["zone_id"]
+        enriched_grid.append(zone)
+
+    if camera_alert_active and enriched_grid:
+        # Override the most dangerous zone to RED due to camera motion detection
+        max_zone = next((z for z in enriched_grid if z["zone_id"] == most_dangerous), enriched_grid[0])
+        max_zone["risk"] = 0.95
+        max_zone["status"] = "RED"
+        highest_risk = 0.95
+        most_dangerous = max_zone["zone_id"]
+
+    return jsonify({
+        "region":         region_cfg["name"],
+        "region_key":     region_key,
+        "zones":          enriched_grid,
+        "most_dangerous": most_dangerous,
+        "sensors": {
+            "temperature": weather["temp"],
+            "humidity": weather["humidity"],
+            "vibration": round(np.random.uniform(0.01, 0.06), 3),
+            "soil_moisture": min(100, int(weather["humidity"] * 0.9 + rainfall * 10))
+        }
+    })
+
+
+# -----------------------------
+# 🔹 List available regions
+# -----------------------------
+@app.route("/regions")
+def list_regions():
+    return jsonify({
+        k: {"name": v["name"], "city": v["city"]}
+        for k, v in REGIONS.items()
+    })
+
+
+# -----------------------------
+# 🔹 Camera Motion Endpoint
+# -----------------------------
+@app.route("/api/camera_motion", methods=["POST"])
+def camera_motion():
+    global camera_alert_active, prev_camera_frame
+    
+    data = request.json
+    if not data or "image" not in data:
+        return jsonify({"error": "No image data"}), 400
+
+    try:
+        image_data = data["image"].split(",")[1]
+        img_bytes = base64.b64decode(image_data)
+        np_arr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (21, 21), 0)
+
+        if prev_camera_frame is None:
+            prev_camera_frame = gray
+            camera_alert_active = False
+            return jsonify({"alert": False})
+
+        # Compute difference between current frame and previous frame
+        frame_diff = cv2.absdiff(prev_camera_frame, gray)
+        thresh = cv2.threshold(frame_diff, 25, 255, cv2.THRESH_BINARY)[1]
+        thresh = cv2.dilate(thresh, None, iterations=2)
+        
+        # Find contours
+        contours, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        motion_detected = False
+        for contour in contours:
+            if cv2.contourArea(contour) > 5000: # Threshold for "significant" movement (e.g., landslide)
+                motion_detected = True
+                break
+                
+        camera_alert_active = motion_detected
+        prev_camera_frame = gray
+
+        return jsonify({"alert": camera_alert_active})
+
+    except Exception as e:
+        print("Camera motion error:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+# -----------------------------
+# 🔹 Basic Routes
+# -----------------------------
+@app.route("/")
+def home():
+    return "INNOBOT – AI Micro-Zone Landslide System Running"
+
+@app.route("/dashboard")
+def dashboard():
+    return render_template("dashboard.html")
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
