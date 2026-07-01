@@ -336,7 +336,7 @@ def camera_motion():
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (21, 21), 0)
 
-        if prev_camera_frame is None:
+        if prev_camera_frame is None or prev_camera_frame.shape != gray.shape:
             prev_camera_frame = gray
             camera_alert_active = False
             return jsonify({"alert": False})
