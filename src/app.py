@@ -1,11 +1,12 @@
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, Response
 from rescue import rescue_bp
 import numpy as np
 import requests
 import joblib
 import os
 import cv2
-import base64
+import threading
+import time
 import sensors
 
 app = Flask(__name__)
@@ -26,6 +27,60 @@ print("Model expects:", model.n_features_in_)
 camera_alert_active = False
 prev_camera_frame = None
 tilt_threshold = 15.0  # Degrees
+latest_jpeg_frame = None
+
+# Background Video Capture
+def camera_thread():
+    global camera_alert_active, prev_camera_frame, latest_jpeg_frame
+    cap = cv2.VideoCapture(0)
+    
+    # Try different backend if default fails on Pi (like V4L2)
+    if not cap.isOpened():
+        cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+        
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            time.sleep(1)
+            continue
+            
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (21, 21), 0)
+
+        if prev_camera_frame is None or prev_camera_frame.shape != gray.shape:
+            prev_camera_frame = gray
+            continue
+
+        frame_diff = cv2.absdiff(prev_camera_frame, gray)
+        thresh = cv2.threshold(frame_diff, 25, 255, cv2.THRESH_BINARY)[1]
+        thresh = cv2.dilate(thresh, None, iterations=2)
+        
+        contours, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        motion_detected = False
+        for contour in contours:
+            if cv2.contourArea(contour) > 5000:
+                motion_detected = True
+                # Draw bounding box on frame
+                (x, y, w, h) = cv2.boundingRect(contour)
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
+                
+        camera_alert_active = motion_detected
+        prev_camera_frame = gray
+        
+        # Add warning text
+        if motion_detected:
+            cv2.putText(frame, "MOTION DETECTED", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            
+        ret, jpeg = cv2.imencode('.jpg', frame)
+        if ret:
+            latest_jpeg_frame = jpeg.tobytes()
+            
+        time.sleep(0.1) # 10 FPS to save CPU
+
+# Start background thread
+threading.Thread(target=camera_thread, daemon=True).start()
+
 
 
 # -----------------------------
@@ -346,52 +401,20 @@ def update_settings():
 
 
 # -----------------------------
-# 🔹 Camera Motion Endpoint
+# 🔹 Camera Motion & Video Streaming
 # -----------------------------
-@app.route("/api/camera_motion", methods=["POST"])
-def camera_motion():
-    global camera_alert_active, prev_camera_frame
-    
-    data = request.json
-    if not data or "image" not in data:
-        return jsonify({"error": "No image data"}), 400
+def generate_video_stream():
+    global latest_jpeg_frame
+    while True:
+        if latest_jpeg_frame is not None:
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + latest_jpeg_frame + b'\r\n\r\n')
+        time.sleep(0.1)
 
-    try:
-        image_data = data["image"].split(",")[1]
-        img_bytes = base64.b64decode(image_data)
-        np_arr = np.frombuffer(img_bytes, np.uint8)
-        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+@app.route("/video_feed")
+def video_feed():
+    return Response(generate_video_stream(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (21, 21), 0)
-
-        if prev_camera_frame is None or prev_camera_frame.shape != gray.shape:
-            prev_camera_frame = gray
-            camera_alert_active = False
-            return jsonify({"alert": False})
-
-        # Compute difference between current frame and previous frame
-        frame_diff = cv2.absdiff(prev_camera_frame, gray)
-        thresh = cv2.threshold(frame_diff, 25, 255, cv2.THRESH_BINARY)[1]
-        thresh = cv2.dilate(thresh, None, iterations=2)
-        
-        # Find contours
-        contours, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        motion_detected = False
-        for contour in contours:
-            if cv2.contourArea(contour) > 5000: # Threshold for "significant" movement (e.g., landslide)
-                motion_detected = True
-                break
-                
-        camera_alert_active = motion_detected
-        prev_camera_frame = gray
-
-        return jsonify({"alert": camera_alert_active})
-
-    except Exception as e:
-        print("Camera motion error:", e)
-        return jsonify({"error": str(e)}), 500
 
 
 # -----------------------------

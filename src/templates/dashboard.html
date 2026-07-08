@@ -898,8 +898,7 @@
             <div class="sidebar-section">
                 <h3>Camera Monitor</h3>
                 <div style="background:#000; border:1px solid var(--border); height:120px; position:relative; overflow:hidden; border-radius:3px; margin-bottom:8px;" id="camera-feed-container">
-                    <video id="webcam-video" autoplay playsinline style="width:100%; height:100%; object-fit:cover; filter:grayscale(30%);"></video>
-                    <canvas id="webcam-canvas" style="display:none;"></canvas>
+                    <img id="webcam-video" style="width:100%; height:100%; object-fit:cover; filter:grayscale(30%); display:none;" src="" />
                     <div style="position:absolute; top:4px; left:4px; color:var(--red); font-family:monospace; font-size:0.6rem; animation:blink 1.2s infinite;">⏺ REC</div>
                     <div id="motion-overlay" style="display:none; position:absolute; inset:0; border:2px solid var(--red); background:rgba(255,23,68,0.2); pointer-events:none; align-items:center; justify-content:center; flex-direction:column;">
                         <span style="color:var(--red); font-weight:bold; font-size:0.9rem; background:rgba(0,0,0,0.7); padding:2px 6px; font-family:'Share Tech Mono', monospace; text-align:center;">⚠ MOTION<br>DETECTED</span>
@@ -1207,33 +1206,25 @@ window.mockMotionActive = false;
 let webcamStream = null;
 let motionInterval = null;
 
-async function toggleMotionSimulation() {
+function toggleMotionSimulation() {
     const btn = document.getElementById('motion-sim-btn');
+    const img = document.getElementById('webcam-video');
     const overlay = document.getElementById('motion-overlay');
-    const video = document.getElementById('webcam-video');
     
     if (!window.mockMotionActive) {
-        try {
-            webcamStream = await navigator.mediaDevices.getUserMedia({ video: true });
-            video.srcObject = webcamStream;
-            window.mockMotionActive = true;
-            
-            btn.textContent = 'DISABLE LIVE CAMERA';
-            btn.style.background = 'var(--red)';
-            btn.style.color = '#fff';
-            btn.style.borderColor = 'var(--red)';
-            
-            motionInterval = setInterval(sendFrameToBackend, 1000);
-        } catch (err) {
-            alert('Camera access denied or unavailable: ' + err.message);
-        }
+        // Point to backend MJPEG stream
+        img.src = "/video_feed";
+        img.style.display = "block";
+        window.mockMotionActive = true;
+        
+        btn.textContent = 'DISABLE LIVE CAMERA';
+        btn.style.background = 'var(--red)';
+        btn.style.color = '#fff';
+        btn.style.borderColor = 'var(--red)';
     } else {
         window.mockMotionActive = false;
-        if (webcamStream) {
-            webcamStream.getTracks().forEach(track => track.stop());
-        }
-        video.srcObject = null;
-        clearInterval(motionInterval);
+        img.src = "";
+        img.style.display = "none";
         
         btn.textContent = 'ENABLE LIVE CAMERA';
         btn.style.background = 'transparent';
@@ -1241,37 +1232,6 @@ async function toggleMotionSimulation() {
         btn.style.borderColor = 'var(--yellow)';
         overlay.style.display = 'none';
         loadGrid(); // Force immediate update
-    }
-}
-
-async function sendFrameToBackend() {
-    const video = document.getElementById('webcam-video');
-    const canvas = document.getElementById('webcam-canvas');
-    if (!video.videoWidth) return;
-    
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
-    
-    try {
-        const res = await fetch('/api/camera_motion', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: dataUrl })
-        });
-        const data = await res.json();
-        
-        const overlay = document.getElementById('motion-overlay');
-        if (data.alert) {
-            overlay.style.display = 'flex';
-            loadGrid(); // Force dashboard update
-        } else {
-            overlay.style.display = 'none';
-        }
-    } catch(err) {
-        console.error('Camera backend error', err);
     }
 }
 
