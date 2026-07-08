@@ -4,41 +4,41 @@ from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
 import joblib
 
-# -----------------------------
-# 1️⃣ Generate Synthetic but Realistic Training Data
-# -----------------------------
-
-np.random.seed(42)
-
-samples = 3000
-
-rain_24h = np.random.uniform(0, 300, samples)      # mm
-rain_72h = np.random.uniform(0, 600, samples)
-slope = np.random.uniform(0, 1, samples)
-elevation = np.random.uniform(1500, 4500, samples)
-
-# Soil factor (manual classification simulation)
-# 0.1 = rock, 0.4 = laterite, 0.8 = clay, 0.9 = weathered soil
-soil_factor = np.random.choice([0.1, 0.4, 0.8, 0.9], samples)
+import os
 
 # -----------------------------
-# 2️⃣ Logical Landslide Condition (More Realistic)
+# 1️⃣ Load Real Training Data
 # -----------------------------
+DATA_FILE = "real_landslide_data.csv"
 
-landslide = (
-    (rain_72h > 350) &
-    (slope > 0.5) &
-    (soil_factor > 0.6)   # Weak soil increases failure
-).astype(int)
+if not os.path.exists(DATA_FILE):
+    print(f"Error: Real dataset '{DATA_FILE}' not found.")
+    print("Generating a sample template file for you to fill with real data...")
+    
+    # Generate a dummy template with one row to show the format
+    dummy_data = pd.DataFrame({
+        "rain_24h": [150.0],
+        "rain_72h": [400.0],
+        "slope": [0.6],
+        "elevation": [2500.0],
+        "soil_factor": [0.8],
+        "landslide": [1] # 1 for landslide, 0 for no landslide
+    })
+    dummy_data.to_csv(DATA_FILE, index=False)
+    
+    print(f"Template '{DATA_FILE}' created.")
+    print("PLEASE FILL IT WITH REAL HISTORICAL DATA BEFORE TRAINING!")
+    exit(1)
 
-data = pd.DataFrame({
-    "rain_24h": rain_24h,
-    "rain_72h": rain_72h,
-    "slope": slope,
-    "elevation": elevation,
-    "soil_factor": soil_factor,
-    "landslide": landslide
-})
+print(f"Loading real data from {DATA_FILE}...")
+data = pd.read_csv(DATA_FILE)
+
+# Ensure required columns exist
+required_columns = ["rain_24h", "rain_72h", "slope", "elevation", "soil_factor", "landslide"]
+for col in required_columns:
+    if col not in data.columns:
+        print(f"Error: Missing required column '{col}' in your dataset.")
+        exit(1)
 
 # -----------------------------
 # 3️⃣ Train Model

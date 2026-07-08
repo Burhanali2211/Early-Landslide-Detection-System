@@ -6,6 +6,7 @@ import joblib
 import os
 import cv2
 import base64
+import sensors
 
 app = Flask(__name__)
 app.register_blueprint(rescue_bp)
@@ -237,6 +238,11 @@ def grid_risk():
     weather    = get_weather(region_cfg["city"])
     rainfall   = weather["rain"]
 
+    # Get real DHT11 readings, fallback to OpenWeather API
+    real_temp, real_hum = sensors.get_real_climate()
+    current_temp = real_temp if real_temp is not None else weather["temp"]
+    current_hum = real_hum if real_hum is not None else weather["humidity"]
+
     rain_24h = rainfall * 4
     rain_72h = rainfall * 10
 
@@ -297,10 +303,10 @@ def grid_risk():
         "zones":          enriched_grid,
         "most_dangerous": most_dangerous,
         "sensors": {
-            "temperature": weather["temp"],
-            "humidity": weather["humidity"],
-            "vibration": round(np.random.uniform(0.01, 0.06), 3),
-            "soil_moisture": min(100, int(weather["humidity"] * 0.9 + rainfall * 10))
+            "temperature": current_temp,
+            "humidity": current_hum,
+            "vibration": sensors.get_real_vibration(),
+            "soil_moisture": sensors.get_real_soil_moisture() if sensors.get_real_soil_moisture() is not None else min(100, int(current_hum * 0.9 + rainfall * 10))
         }
     })
 
