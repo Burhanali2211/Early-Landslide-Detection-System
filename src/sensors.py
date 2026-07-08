@@ -72,6 +72,27 @@ def get_real_vibration():
         print(f"Error reading MPU6050: {e}")
         return 0.0
 
+def get_real_tilt():
+    """Reads MPU6050 accelerometer and calculates maximum tilt angle (pitch/roll) in degrees."""
+    if not HARDWARE_AVAILABLE:
+        return round(random.uniform(0.0, 5.0), 1)
+        
+    try:
+        accel_x = read_word_2c(MPU6050_ADDR, ACCEL_XOUT_H) / 16384.0
+        accel_y = read_word_2c(MPU6050_ADDR, ACCEL_YOUT_H) / 16384.0
+        accel_z = read_word_2c(MPU6050_ADDR, ACCEL_ZOUT_H) / 16384.0
+        
+        # Calculate Pitch and Roll
+        pitch = math.atan2(accel_y, math.sqrt(accel_x**2 + accel_z**2)) * 180 / math.pi
+        roll = math.atan2(-accel_x, accel_z) * 180 / math.pi
+        
+        # Return the maximum absolute tilt angle
+        max_tilt = max(abs(pitch), abs(roll))
+        return round(max_tilt, 1)
+    except Exception as e:
+        print(f"Error reading MPU6050 tilt: {e}")
+        return 0.0
+
 def get_digital_vibration():
     """Reads simple digital vibration sensor (SW-420). Returns 1 for motion, 0 for still."""
     if not HARDWARE_AVAILABLE:

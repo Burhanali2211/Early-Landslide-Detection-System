@@ -882,6 +882,15 @@
             </div>
 
             <div class="sidebar-section">
+                <h3>Hardware Settings</h3>
+                <div style="display:flex; justify-content:space-between; font-size:0.7rem; font-family:'Share Tech Mono', monospace; color:var(--dim); margin-bottom:4px;">
+                    <span>TILT ANGLE: <strong id="sensor-tilt" style="color:#fff">—</strong></span>
+                    <span>THRESH: <strong id="tilt-thresh-lbl" style="color:var(--yellow)">15°</strong></span>
+                </div>
+                <input type="range" id="tilt-slider" min="5" max="45" step="1" value="15" onchange="updateTiltThreshold(this.value)" style="width:100%;">
+            </div>
+
+            <div class="sidebar-section">
                 <h3>Zone Index</h3>
                 <div class="zone-list" id="zone-list"></div>
             </div>
@@ -1265,6 +1274,16 @@ async function sendFrameToBackend() {
         console.error('Camera backend error', err);
     }
 }
+
+function updateTiltThreshold(val) {
+    document.getElementById('tilt-thresh-lbl').textContent = val + '°';
+    fetch('/api/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({tilt_threshold: val})
+    });
+}
+
 function loadGrid() {
     if (isInitialLoad) document.getElementById('spinner').classList.add('show');
     fetch(`/grid_risk?region=${currentRegion}`)
@@ -1361,6 +1380,21 @@ function updateSidebar(data) {
             vibElem.style.color = 'var(--red)';
         } else {
             vibElem.style.color = '#fff';
+        }
+        
+        const tiltElem = document.getElementById('sensor-tilt');
+        tiltElem.textContent = data.sensors.tilt + '°';
+        if (data.sensors.tilt > data.sensors.tilt_threshold) {
+            tiltElem.style.color = 'var(--red)';
+        } else {
+            tiltElem.style.color = '#fff';
+        }
+        
+        const slider = document.getElementById('tilt-slider');
+        const lbl = document.getElementById('tilt-thresh-lbl');
+        if (document.activeElement !== slider) {
+            slider.value = data.sensors.tilt_threshold;
+            lbl.textContent = data.sensors.tilt_threshold + '°';
         }
     }
 

@@ -21,10 +21,12 @@ model = joblib.load(model_path)
 print("Model expects:", model.n_features_in_)
 
 # -----------------------------
-# 🔹 Camera State
+# 🔹 Camera & Sensor State
 # -----------------------------
 camera_alert_active = False
 prev_camera_frame = None
+tilt_threshold = 15.0  # Degrees
+
 
 # -----------------------------
 # 🔹 Region Definitions
@@ -283,14 +285,17 @@ def grid_risk():
     with ThreadPoolExecutor(max_workers=25) as executor:
         results = list(executor.map(process_zone, base_grid))
 
+    # Get real tilt
+    current_tilt = sensors.get_real_tilt()
+    
     for zone in results:
         if zone["risk"] > highest_risk:
             highest_risk   = zone["risk"]
             most_dangerous = zone["zone_id"]
         enriched_grid.append(zone)
 
-    if camera_alert_active and enriched_grid:
-        # Override the most dangerous zone to RED due to camera motion detection
+    if (camera_alert_active or current_tilt > tilt_threshold) and enriched_grid:
+        # Override the most dangerous zone to RED due to camera motion detection or tilt sensor
         max_zone = next((z for z in enriched_grid if z["zone_id"] == most_dangerous), enriched_grid[0])
         max_zone["risk"] = 0.95
         max_zone["status"] = "RED"
@@ -306,7 +311,9 @@ def grid_risk():
             "temperature": current_temp,
             "humidity": current_hum,
             "vibration": sensors.get_real_vibration(),
-            "soil_moisture": sensors.get_real_soil_moisture() if sensors.get_real_soil_moisture() is not None else min(100, int(current_hum * 0.9 + rainfall * 10))
+            "soil_moisture": sensors.get_real_soil_moisture() if sensors.get_real_soil_moisture() is not None else min(100, int(current_hum * 0.9 + rainfall * 10)),
+            "tilt": current_tilt,
+            "tilt_threshold": tilt_threshold
         }
     })
 
@@ -320,6 +327,22 @@ def list_regions():
         k: {"name": v["name"], "city": v["city"]}
         for k, v in REGIONS.items()
     })
+
+# -----------------------------
+# 🔹 Settings Endpoint (Update Tilt Threshold)
+# -----------------------------
+@app.route("/api/settings", methods=["POST"])
+def update_settings():
+    global tilt_threshold
+    data = request.json
+    if data and "tilt_threshold" in data:
+        try:
+            tilt_threshold = float(data["tilt_threshold"])
+            return jsonify({"success": True, "tilt_threshold": tilt_threshold})
+        except ValueError:
+            return jsonify({"error": "Invalid tilt threshold"}), 400
+    return jsonify({"error": "No settings provided"}), 400
+
 
 
 # -----------------------------
