@@ -38,6 +38,10 @@ def camera_thread():
     if not cap.isOpened():
         cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
         
+    # Optimize CPU: Reduce resolution to 320x240 for Raspberry Pi 4
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+        
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -337,7 +341,8 @@ def grid_risk():
     highest_risk   = 0
     most_dangerous = None
 
-    with ThreadPoolExecutor(max_workers=25) as executor:
+    # Optimize CPU: Use 4 workers matching Pi 4's quad-core CPU, instead of 25 concurrent threads
+    with ThreadPoolExecutor(max_workers=4) as executor:
         results = list(executor.map(process_zone, base_grid))
 
     # Get real tilt

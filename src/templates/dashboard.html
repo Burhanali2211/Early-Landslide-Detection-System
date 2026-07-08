@@ -1077,7 +1077,7 @@ function setMode(mode) {
         dot.classList.remove('danger');
         lbl.textContent = 'LIVE MONITORING';
         loadGrid();
-        window._refreshTimer = setInterval(loadGrid, 5000);
+        window._refreshTimer = setInterval(loadGrid, 10000); // 10s poll rate reduces Pi CPU load
     }
 }
 
