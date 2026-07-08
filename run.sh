@@ -22,11 +22,7 @@ elif command -v chromium-browser > /dev/null; then
   chromium-browser http://127.0.0.1:5000/dashboard &
 fi
 
-# Modern Raspberry Pi OS requires libcamerify to bridge the CSI camera to OpenCV (V4L2)
-if command -v libcamerify > /dev/null; then
-    echo "libcamerify found! Launching with Pi Camera support..."
-    libcamerify python app.py
-else
-    # Fallback to standard execution (for laptops, older Pis, or USB webcams)
-    python app.py
-fi
+# Force load the V4L2 driver for Raspberry Pi camera module (creates /dev/video0)
+sudo modprobe bcm2835-v4l2 > /dev/null 2>&1 || true
+
+python app.py
